@@ -12,18 +12,19 @@
 
 (* :Copyright:
 
-     © 2017-2018 by J. M. (pleasureoffiguring(AT)gmail(DOT)com)
+     © 2017-2019 by J. M. (pleasureoffiguring(AT)gmail(DOT)com)
      This work is free. It comes without any warranty, to the extent permitted by applicable law.
      You can redistribute and/or modify it under the terms of the WTFPL (http://www.wtfpl.net/).
 
  *)
 
-(* :Package Version: 2.0 *)
+(* :Package Version: 2.1 *)
 
 (* :Mathematica Version: 8.0 *)
 
 (* :History:
 
+     2.1 - removed support for deprecated ChemSpider SOAP API
      2.0 - improved handling of double bonds, added PubChem support, switched to new ChemSpider API, better handling of files and URLs
      1.1 - fixed a few reported bugs, added explicit input dialog for $ChemSpiderAPIToken, support suboptions for RunOpenBabel
      1.0 - initial release
@@ -77,6 +78,7 @@ MoleculeViewer::ftconv = "The file `1` is not in a format supported by Import. C
 MoleculeViewer::is2d = "Two-dimensional coordinates detected; embedding to 3D.";
 
 GetChemSpider::token = "ChemSpider API key in $ChemSpiderAPIToken not detected or invalid. Please obtain one from https://developer.rsc.org/.";
+GetChemSpider::obsmet = "Method \[Rule] \"SOAP\" is now obsolete. Please obtain a new API key from https://developer.rsc.org/.";
 JME::nojme = "Java Molecular Editor could not be loaded.";
 
 RunOpenBabel::nobab = "Open Babel not installed; please download from http://openbabel.org/.";
@@ -405,24 +407,19 @@ GetChemicalData[str_String, out : (Automatic | "SMILES" | "InChI") : Automatic, 
 
      $ChemSpiderAPIToken = ;
 
-     For backwards compatibility, support for the old SOAP-based API was retained,
-     with the key for it now stored to $ChemSpiderOldAPIToken.
-
  *)
 
 (* ---------------- *)
 
 $dir = DirectoryName[$InputFileName];
 $ChemSpiderAPIToken := $ChemSpiderAPIToken = loadToken["RESTful"];
-$ChemSpiderOldAPIToken := $ChemSpiderOldAPIToken = loadToken["SOAP"];
 reloadToken["RESTful"] := ($ChemSpiderAPIToken = loadToken["RESTful"]);
-reloadToken["SOAP"] := ($ChemSpiderOldAPIToken = loadToken["SOAP"]);
 
-loadToken[type_] := Block[{key = FileNameJoin[{$dir, If[type === "SOAP", "apikey", "apikey-restful"]}], res}, 
+loadToken[type_] := Block[{key = FileNameJoin[{$dir, "apikey-restful"}], res}, 
 
           If[FileExistsQ[key], Uncompress[Get[key]],
               res = DialogInput[DynamicModule[{api}, 
-                                         Column[{Style["Please enter your " <> If[type === "SOAP", "old ", ""] <> "ChemSpider API key:", Bold, 16],
+                                         Column[{Style["Please enter your ChemSpider API key:", Bold, 16],
                                                        InputField[Dynamic[api, (api = #) &], String, FieldSize -> 25], 
                                                        Item[Row[{DefaultButton[DialogReturn[api]], CancelButton[DialogReturn[$Failed]]}], 
                                                                Alignment -> Right]}, Left]]];
@@ -435,8 +432,7 @@ Options[GetChemSpider] = {"MaxResults" -> 1, Method -> Automatic};
 GetChemSpider[arg_, out : (Automatic | "SMILES" | "InChI") : Automatic, OptionsPattern[]] := Block[{met, n},
 
      met = OptionValue[Method];
-     If[met === Automatic,
-         met = If[$VersionNumber >= 10., "RESTful", "SOAP"],
+     If[met === Automatic, met = "RESTful",
          met = met /. {"Legacy" -> "SOAP", _ -> "RESTful"}];
 
      n = Round[OptionValue["MaxResults"]];
@@ -444,7 +440,7 @@ GetChemSpider[arg_, out : (Automatic | "SMILES" | "InChI") : Automatic, OptionsP
                 "RESTful",
                 gCSRESTful[arg, out, "MaxResults" -> n],
                 "SOAP",
-                gCSSOAP[arg, out, "MaxResults" -> n],
+	        Message[MoleculeViewer::obsmet]; $Failed,
                 _, $Failed]]
 
 SetAttributes[csconv, Listable];
@@ -575,40 +571,6 @@ gCSRESTful[str_String, out : (Automatic | "SMILES" | "InChI") : Automatic, Optio
                               $Failed], $Failed], $Failed]]
 
 gCSRESTful[l_List, rest___] := gCSRESTful[#, rest] & /@ l
-
-SetAttributes[gCSSOAP, Listable];
-
-gCSSOAP[csid_Integer?Positive, out : (Automatic | "SMILES" | "InChI") : Automatic, opts___] := Module[{res, url},
-
-     If[! ValueQ[$ChemSpiderOldAPIToken] || ! StringQ[$ChemSpiderOldAPIToken],
-         Message[GetChemSpider::token]; Return[$Failed, Module]];
-
-     If[out === Automatic,
-         url = "http://www.chemspider.com/FilesHandler.ashx?type=str&3d=yes&id=" <> IntegerString[csid];
-         If[TrueQ[$debug], Print[Defer[Import][url, "MOL"]]];
-         Import[url, {"MOL", {"VertexTypes", "EdgeRules", "EdgeTypes", "VertexCoordinates"}}],
-         url = "http://www.chemspider.com/Search.asmx/GetCompoundInfo?token=" <> $ChemSpiderOldAPIToken <> "&CSID=" <> IntegerString[csid];
-         If[TrueQ[$debug], Print[Defer[Import][url, "XML"]]];
-         res = Quiet[Check[Import[url, "XML"], $Failed]];
-         If[res =!= $Failed, 
-             First[Cases[res, XMLElement[out, _, {dat_}] :> dat, Infinity]], 
-             res]]]
-
-gCSSOAP[str_String, out : (Automatic | "SMILES" | "InChI") : Automatic, OptionsPattern[{"MaxResults" -> 1}]] := Module[{id, res, url},
-
-     If[! ValueQ[$ChemSpiderOldAPIToken] || ! StringQ[$ChemSpiderOldAPIToken],
-         Message[GetChemSpider::token]; Return[$Failed, Module]];
-
-     If[StringMatchQ[str, NumberString],
-         Return[gCSSOAP[Round[FromDigits[str]], out], Module]];
-
-     url = "http://www.chemspider.com/Search.asmx/SimpleSearch?token=" <> $ChemSpiderOldAPIToken <> "&query=" <> percentEncode[str];
-     If[TrueQ[$debug], Print[Defer[Import][url, "XML"]]];
-     id = Quiet[Check[Import[url, "XML"], $Failed]];
-     If[id =!= $Failed,
-         res = Cases[id, XMLElement["int", _, {csid_}] :> FromDigits[csid], Infinity, Max[1, Round[OptionValue["MaxResults"] /. All -> Infinity]]];
-         If[Length[res] == 1, res = First[res]]; gCSSOAP[res, out],
-         $Failed]]
 
 SetAttributes[GetPubChem, Listable];
 

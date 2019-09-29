@@ -1,6 +1,8 @@
 # MoleculeViewer
 ### A package for visualizing molecules.
 
+[![DOI](https://zenodo.org/badge/104575485.svg)](https://zenodo.org/badge/latestdoi/104575485)
+
 ![cucurbituril rendered using MoleculeViewer](https://user-images.githubusercontent.com/13274842/65828934-ed138600-e2d2-11e9-9b07-32fb147249d1.png)
 
 MoleculeViewer is a *Mathematica* package that renders molecules in a manner resembling physical molecular models. In particular, multiple bonds are depicted as out-of-plane bonds.
